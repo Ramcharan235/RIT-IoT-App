@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RIT IoT App</title>
+<style>
+:root{--bg:#f3f5f2;--sf:#fff;--tx:#14231c;--mu:#5c6b63;--ac:#0d7a5f;--ac2:#e8f3ee;--bd:#d5ddd8;--er:#b3261e;--cb:#101a16;--ct:#d7efe4;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1612;--sf:#17221c;--tx:#e6f0ea;--mu:#93a59b;--ac:#3ecf9f;--ac2:#1d2f27;--bd:#2c3d34;--er:#ff8a80;--cb:#0a100d}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 "Trebuchet MS","Segoe UI",system-ui,sans-serif}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--sf);border-bottom:1px solid var(--bd)}
+header h1{font-size:19px;margin:0;flex:1}
+button{font:inherit;cursor:pointer;border:1px solid var(--bd);background:var(--sf);color:var(--tx);border-radius:10px;padding:9px 14px}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+button:focus-visible,input:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+.ib{width:38px;height:38px;border-radius:50%;padding:0;font-weight:700;color:var(--ac);border:2px solid var(--ac);background:transparent}
+main{max-width:720px;margin:0 auto;padding:16px}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:12px}
+.row{display:flex;align-items:center;gap:10px}.row>.g{flex:1}
+.big{font-size:34px;font-weight:700}.mu{color:var(--mu);font-size:14px}
+input{font:inherit;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);width:100%}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--er);display:inline-block}.dot.on{background:var(--ac)}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px}.tabs button{white-space:nowrap}.tabs button.a{background:var(--ac);color:#fff;border-color:var(--ac)}
+.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid var(--bd);padding:6px 8px;text-align:left}
+pre{background:var(--cb);color:var(--ct);padding:12px;border-radius:10px;overflow-x:auto;font:12.5px/1.45 ui-monospace,Menlo,Consolas,monospace;max-height:420px}
+h2{font-size:20px;margin:6px 0 10px}h3{font-size:16px;margin:14px 0 6px}li{margin-bottom:5px}
+.note{background:var(--ac2);border-left:4px solid var(--ac);padding:10px 12px;border-radius:8px;font-size:14px;margin:10px 0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:var(--ac2);border-radius:10px;padding:6px 10px;font-size:14px}
+</style></head><body>
+<header id="hd"></header><main id="app"></main>
+<script>
+var HDR='#include <ESP8266WiFi.h>\n#include <ESP8266WebServer.h>\n\nconst char* ssid = "YOUR_WIFI_NAME";\nconst char* pass = "YOUR_WIFI_PASSWORD";\nESP8266WebServer server(80);\n\n// Sends JSON with CORS enabled so the app can read it\nvoid sendJson(int code, const String& j) {\n  server.sendHeader("Access-Control-Allow-Origin", "*");\n  server.send(code, "application/json", j);\n}\nvoid connectWiFi() {\n  WiFi.mode(WIFI_STA);\n  WiFi.begin(ssid, pass);\n  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }\n  Serial.print("\\nIP address: ");\n  Serial.println(WiFi.localIP());   // type this IP into the app\n}\n';
+var STAT=function(n){return 'server.on("/status", [](){ sendJson(200, "{\\"device\\":\\"nodemcu\\",\\"project\\":\\"'+n+'\\"}"); });\n'};
+var RELAY=HDR+'\n// Relay module IN -> D1 (GPIO5), external LED -> D2 (GPIO4)\n#define RELAY_PIN 5\n#define LED_PIN 4\nbool isOn = false;\n\nvoid apply() {\n  digitalWrite(RELAY_PIN, isOn ? LOW : HIGH); // most relay modules are active-LOW\n  digitalWrite(LED_PIN, isOn ? HIGH : LOW);\n}\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(RELAY_PIN, OUTPUT);\n  pinMode(LED_PIN, OUTPUT);\n  apply();\n  connectWiFi();\n  '+STAT('relay')+'  // GET /relay?state=1 (on) or state=0 (off)\n  server.on("/relay", [](){\n    isOn = (server.arg("state") == "1");\n    apply();\n    sendJson(200, String("{\\"relay\\":") + (isOn ? "true" : "false") + "}");\n  });\n  server.begin();\n}\nvoid loop() { server.handleClient(); }\n';
+var DHT=HDR+'#include <DHT.h>\n\n// DHT11 DATA -> D5 (GPIO14)\n#define DHT_PIN 14\nDHT dht(DHT_PIN, DHT11);\n\nvoid setup() {\n  Serial.begin(115200);\n  dht.begin();\n  connectWiFi();\n  '+STAT('dht')+'  // GET /dht -> {"t":28.0,"h":55.0}\n  server.on("/dht", [](){\n    float t = dht.readTemperature();\n    float h = dht.readHumidity();\n    if (isnan(t) || isnan(h)) { sendJson(500, "{\\"error\\":\\"dht_read_failed\\"}"); return; }\n    sendJson(200, "{\\"t\\":" + String(t, 1) + ",\\"h\\":" + String(h, 1) + "}");\n  });\n  server.begin();\n}\nvoid loop() { server.handleClient(); }\n';
+var PARK=HDR+'\n// HC-SR04: TRIG -> D6 (GPIO12), ECHO -> D7 (GPIO13) through a voltage divider\n// Warning LED -> D2 (GPIO4)\n#define TRIG_PIN 12\n#define ECHO_PIN 13\n#define LED_PIN 4\n\nlong readCm() {\n  digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(2);\n  digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);\n  digitalWrite(TRIG_PIN, LOW);\n  long us = pulseIn(ECHO_PIN, HIGH, 30000);   // 30 ms timeout\n  return us == 0 ? -1 : us / 58;\n}\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(TRIG_PIN, OUTPUT);\n  pinMode(ECHO_PIN, INPUT);\n  pinMode(LED_PIN, OUTPUT);\n  connectWiFi();\n  '+STAT('parking')+'  // GET /distance -> {"cm":32,"state":"near"}\n  server.on("/distance", [](){\n    long cm = readCm();\n    const char* s = (cm < 0) ? "none" : (cm < 15) ? "stop" : (cm < 40) ? "near" : "free";\n    digitalWrite(LED_PIN, (cm >= 0 && cm < 40) ? HIGH : LOW);\n    sendJson(200, "{\\"cm\\":" + String(cm) + ",\\"state\\":\\"" + s + "\\"}");\n  });\n  server.begin();\n}\nvoid loop() { server.handleClient(); }\n';
+var SENS=HDR+'#include <DHT.h>\n\n// DHT11 -> D5 (GPIO14) | LDR divider -> A0 | HC-SR04 TRIG D6 (GPIO12), ECHO D7 (GPIO13)\n#define DHT_PIN 14\n#define TRIG_PIN 12\n#define ECHO_PIN 13\nDHT dht(DHT_PIN, DHT11);\n\nlong readCm() {\n  digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(2);\n  digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);\n  digitalWrite(TRIG_PIN, LOW);\n  long us = pulseIn(ECHO_PIN, HIGH, 30000);\n  return us == 0 ? -1 : us / 58;\n}\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(TRIG_PIN, OUTPUT);\n  pinMode(ECHO_PIN, INPUT);\n  dht.begin();\n  connectWiFi();\n  '+STAT('sensors')+'  // GET /sensors -> {"t":..,"h":..,"ldr":..,"cm":..}\n  server.on("/sensors", [](){\n    float t = dht.readTemperature(), h = dht.readHumidity();\n    if (isnan(t)) t = -999;  if (isnan(h)) h = -999;   // -999 = sensor error\n    int ldr = analogRead(A0);                          // 0-1023\n    sendJson(200, "{\\"t\\":" + String(t, 1) + ",\\"h\\":" + String(h, 1) + ",\\"ldr\\":" + ldr + ",\\"cm\\":" + readCm() + "}");\n  });\n  server.begin();\n}\nvoid loop() { server.handleClient(); }\n';
+var COMMON_T=["Board does not appear as a COM port: install the CH340 (or CP2102) USB driver and use a data-capable USB cable.","Wi-Fi never connects: the ESP8266 supports 2.4 GHz only. Check the SSID and password, and keep the phone on the same router.","App says connection failed: confirm the IP in Serial Monitor (115200 baud), and test http://IP/status in the phone browser.","Random resets: power from a good USB supply; relays and sensors on a weak port cause brown-outs."];
+var LIBS="Board package: “esp8266 by ESP8266 Community” (Boards Manager). Select board “NodeMCU 1.0 (ESP-12E Module)”.";
+var P=[
+{id:"relay",name:"Relay / LED Control",ic:"💡",d:"Switch a relay and LED on or off from your phone.",ctl:"relay",
+ intro:"The phone sends an HTTP request to the NodeMCU, which switches a GPIO pin. The NodeMCU runs a small web server on port 80.",
+ comps:[["🔲","ESP8266 NodeMCU"],["🔌","1-channel relay module (5 V)"],["💡","LED + 220 Ω resistor"],["🧵","Jumper wires, USB cable"]],
+ pins:[["Relay IN","D1 (GPIO5)","Signal"],["Relay VCC","VIN (5 V)","Power"],["Relay GND","GND","Ground"],["LED anode (via 220 Ω)","D2 (GPIO4)","Signal"],["LED cathode","GND","Ground"]],
+ pinNote:"Avoid D3 (GPIO0), D4 (GPIO2) and D8 (GPIO15) for outputs: they control boot mode. For mains loads, use an isolated relay module and have a qualified person wire the high-voltage side.",
+ code:RELAY,ep:"GET /relay?state=1 | /relay?state=0 | /status",
+ trouble:["Relay works backwards: your module is active-HIGH. Swap HIGH and LOW in apply().","Clicking but no load switching: check the COM/NO terminals.","Board fails to boot with relay attached: confirm it is on D1, not D3/D4."]},
+{id:"gesture",name:"Camera Gesture Control",ic:"✋",d:"Control the relay with hand gestures seen by the phone camera.",ctl:"relay",
+ intro:"The phone camera recognises a gesture (for example open palm = on, fist = off) and sends the same relay command to the NodeMCU. The NodeMCU only receives HTTP commands.",
+ comps:[["🔲","ESP8266 NodeMCU"],["🔌","Relay module"],["💡","LED + 220 Ω"],["📱","Phone with camera"]],
+ pins:[["Relay IN","D1 (GPIO5)","Signal"],["Relay VCC","VIN (5 V)","Power"],["Relay GND","GND","Ground"],["LED anode (via 220 Ω)","D2 (GPIO4)","Signal"]],
+ pinNote:"Identical wiring and firmware to Relay / LED Control.",code:RELAY,ep:"GET /relay?state=1 | /relay?state=0",
+ trouble:["Gesture not detected: use good lighting and keep the hand inside the frame.","Gesture detected but nothing happens: check the connection badge on the home screen.","Camera denied: allow camera permission in the browser."]},
+{id:"voice",name:"Switi Voice Assistant",ic:"🎙️",d:"Say “light on” or “light off” to control the relay.",ctl:"voice",
+ intro:"The phone converts speech to text using the browser’s speech recognition, then sends the matching relay command to the NodeMCU.",
+ comps:[["🔲","ESP8266 NodeMCU"],["🔌","Relay module"],["💡","LED + 220 Ω"],["🎤","Phone microphone"]],
+ pins:[["Relay IN","D1 (GPIO5)","Signal"],["Relay VCC","VIN (5 V)","Power"],["Relay GND","GND","Ground"],["LED anode (via 220 Ω)","D2 (GPIO4)","Signal"]],
+ pinNote:"Identical wiring and firmware to Relay / LED Control.",code:RELAY,ep:"GET /relay?state=1 | /relay?state=0",
+ trouble:["Mic button does nothing: speech recognition works in Chrome and Edge only.","Wrong words heard: speak slowly and say “on” or “off”.","Mic denied: allow microphone permission."]},
+{id:"dht",name:"Temperature & Humidity",ic:"🌡️",d:"Read DHT11 temperature and humidity.",ctl:"dht",
+ intro:"The DHT11 sends a digital reading to the NodeMCU. The app requests /dht and shows the values.",
+ comps:[["🌡️","DHT11 sensor (3-pin module)"],["🔲","ESP8266 NodeMCU"],["🧵","Jumper wires"]],
+ pins:[["DHT11 DATA","D5 (GPIO14)","Signal"],["DHT11 VCC","3V3","Power 3.3 V"],["DHT11 GND","GND","Ground"]],
+ pinNote:"Use the 3-pin module (it has a built-in pull-up). A bare 4-pin DHT11 needs a 10 kΩ resistor between DATA and VCC.",
+ code:DHT,ep:"GET /dht | /status",lib:"Libraries (Library Manager): “DHT sensor library” and “Adafruit Unified Sensor” by Adafruit.",
+ trouble:["Error “dht_read_failed”: check DATA wiring and wait 2 s between reads.","Values stuck at 0: confirm sensor type is DHT11 (use DHT22 in code if you have that).","Readings off by a few degrees: normal for DHT11 (±2 °C, ±5 %)."]},
+{id:"parking",name:"Parking Distance",ic:"🚗",d:"Ultrasonic distance with free / near / stop state.",ctl:"parking",
+ intro:"The HC-SR04 sends an ultrasonic pulse and times the echo. The NodeMCU converts it to centimetres, lights a warning LED and reports a state: free (over 40 cm), near (15–40 cm) or stop (under 15 cm).",
+ comps:[["📡","HC-SR04 ultrasonic sensor"],["🔲","ESP8266 NodeMCU"],["💡","LED + 220 Ω"],["🧱","Resistors 1 kΩ and 2 kΩ"]],
+ pins:[["HC-SR04 VCC","VIN (5 V)","Power 5 V"],["HC-SR04 TRIG","D6 (GPIO12)","Signal"],["HC-SR04 ECHO","D7 (GPIO13) via divider","Signal 5 V → 3.3 V"],["HC-SR04 GND","GND","Ground"],["LED anode (via 220 Ω)","D2 (GPIO4)","Signal"]],
+ pinNote:"ECHO outputs 5 V but ESP8266 pins tolerate only 3.3 V. Wire ECHO → 1 kΩ → D7, and D7 → 2 kΩ → GND.",
+ code:PARK,ep:"GET /distance | /status",
+ trouble:["Always -1: check TRIG/ECHO are not swapped and the divider is correct.","Erratic values: point at a flat surface, 5 cm to 4 m range.","Board resets: power the sensor from VIN with a solid USB supply."]},
+{id:"sensors",name:"Sensor Status",ic:"📊",d:"Live view of temperature, humidity, light and distance.",ctl:"sensors",
+ intro:"One NodeMCU reads a DHT11, an LDR light sensor and an HC-SR04. The app polls /sensors every 2 seconds.",
+ comps:[["🌡️","DHT11 module"],["☀️","LDR + 10 kΩ resistor"],["📡","HC-SR04 + 1 kΩ / 2 kΩ resistors"],["🔲","ESP8266 NodeMCU"]],
+ pins:[["DHT11 DATA","D5 (GPIO14)","3.3 V"],["LDR leg 1","3V3","Power 3.3 V"],["LDR leg 2 + 10 kΩ","A0 (10 kΩ other end to GND)","Analog 0–3.3 V"],["HC-SR04 VCC","VIN (5 V)","Power 5 V"],["HC-SR04 TRIG","D6 (GPIO12)","Signal"],["HC-SR04 ECHO","D7 (GPIO13) via divider","5 V → 3.3 V"],["All grounds","GND","Common ground"]],
+ pinNote:"The ESP8266 has only one analog input (A0). To read more analog sensors, add an ADS1115 (I2C: D1 = SCL, D2 = SDA) or a CD74HC4067 multiplexer.",
+ code:SENS,ep:"GET /sensors | /status",lib:"Libraries: “DHT sensor library” and “Adafruit Unified Sensor”.",
+ trouble:["Temperature shows -999: DHT11 read failed, check wiring.","LDR always 0 or 1023: check the 10 kΩ divider.","Distance -1: no echo, check the ECHO divider."]}];
+var base="",conn=false,timer=null,recog=null;
+var $=function(i){return document.getElementById(i)};
+function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
+base=ls("ip")||"";
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
+function hdr(title,back,info){$("hd").innerHTML=(back?'<button id="bk" aria-label="Back">←</button>':'')+'<h1>'+title+'</h1>'+(info?'<button class="ib" id="ib" aria-label="Information about '+title+'">ⓘ</button>':'');
+if(back)$("bk").onclick=function(){history.back()};if(info)$("ib").onclick=function(){location.hash=info}}
+async function api(path){var c=new AbortController(),t=setTimeout(function(){c.abort()},4000);try{var r=await fetch("http://"+base+path,{signal:c.signal});if(!r.ok)throw new Error("HTTP "+r.status);return await r.json()}finally{clearTimeout(t)}}
+function badge(){var e=$("cs");if(e)e.innerHTML='<span class="dot'+(conn?' on':'')+'"></span> '+(conn?'Connected to '+esc(base):'Not connected')}
+async function connect(){var ip=$("ip").value.trim();if(!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)){$("msg").textContent="Enter a valid IP address like 192.168.1.45.";return}
+base=ip;ls("ip",ip);$("msg").textContent="Connecting…";
+try{var j=await api("/status");conn=true;$("msg").textContent="Connected. Device project: "+(j.project||"unknown")}catch(e){conn=false;$("msg").textContent="Could not reach http://"+ip+"/status. Check the IP and that the phone is on the same Wi-Fi. If this page is opened from an https link, the browser blocks calls to http devices; see App Information."}badge()}
+function home(){hdr("RIT IoT App",false,"app-info");
+$("app").innerHTML='<div class="card"><h2>Connect your NodeMCU</h2><div class="row"><input id="ip" inputmode="decimal" placeholder="NodeMCU IP, e.g. 192.168.1.45" value="'+esc(base)+'"><button class="p" id="cb">Connect</button></div><p class="mu" id="msg">Enter the IP shown in the Arduino Serial Monitor.</p><div id="cs"></div></div>'+
+P.map(function(p){return '<div class="card row"><div style="font-size:30px">'+p.ic+'</div><button class="g" style="text-align:left;border:0;background:none;padding:0" data-p="'+p.id+'"><b>'+p.name+'</b><div class="mu">'+p.d+'</div></button><button class="ib" data-i="'+p.id+'" aria-label="Information about '+p.name+'">ⓘ</button></div>'}).join("");
+$("cb").onclick=connect;badge();
+document.querySelectorAll("[data-p]").forEach(function(b){b.onclick=function(){location.hash="p-"+b.dataset.p}});
+document.querySelectorAll("[data-i]").forEach(function(b){b.onclick=function(){location.hash="info-"+b.dataset.i}})}
+function appInfo(){hdr("App Information",true,null);
+var S=function(h,items){return '<div class="card"><h2>'+h+'</h2>'+items+'</div>'};
+var ol=function(a){return '<ol>'+a.map(function(x){return '<li>'+x+'</li>'}).join("")+'</ol>'};
+$("app").innerHTML=
+S("1. What is the RIT IoT App?","<p>A beginner-friendly app that controls and monitors electronics projects built on the ESP8266 NodeMCU board, over your home Wi-Fi.</p>")+
+S("2. How it works","<p>The NodeMCU joins your Wi-Fi and runs a tiny web server. The app sends simple requests such as <code>/relay?state=1</code> and reads answers such as <code>/dht</code>. Both devices must be on the same network.</p>")+
+S("3. Connect the NodeMCU board",ol(["Install the Arduino IDE, then add the ESP8266 board package.","Plug the NodeMCU into your computer with a USB data cable (install the CH340 driver if needed).","Open a project, tap ⓘ on it, and copy its code.","Enter your Wi-Fi name and password in the code, select “NodeMCU 1.0 (ESP-12E Module)”, and upload."]))+
+S("4. Same Wi-Fi network","<p>Connect your phone to the same 2.4 GHz router as the NodeMCU. Guest networks and “client isolation” settings block communication.</p>")+
+S("5. Find (discover) the NodeMCU",ol(["Open Arduino Serial Monitor at 115200 baud and press RST on the board.","The board prints <code>IP address: 192.168.x.x</code>.","Alternative: open your router’s connected-devices list and look for “ESP-…”.","Browsers cannot scan the network automatically, so the IP is entered manually."]))+
+S("6. Connect with the IP address","<p>On the home screen, type the IP into the box and tap <b>Connect</b>. The app requests <code>/status</code> from the board.</p>")+
+S("7. Check connection status","<p>The green dot on the home screen means the board answered. A red dot means no answer. You can also open <code>http://IP/status</code> in a phone browser.</p>")+
+S("8. Basic troubleshooting","<ul>"+COMMON_T.map(function(x){return '<li>'+x+'</li>'}).join("")+"</ul>")+
+S("9. Select and operate projects","<p>Tap a project card to open its control screen. Tap ⓘ on any card or project screen for components, wiring, full code, steps and fixes.</p>")+
+'<div class="note"><b>Note:</b> this Android app is set up to allow plain http, so it can talk to the NodeMCU on your local Wi-Fi. Voice recognition may not work inside the Android app; use the ON/OFF buttons.</div>'}
+function pInfo(id){var p=P.find(function(x){return x.id===id});hdr(p.name+" – Info",true,null);
+var tabs=["A Introduction","B Components","C Wiring","D Code","E Steps","F Troubleshooting"];
+function show(i){document.querySelectorAll(".tabs button").forEach(function(b,k){b.className=k===i?"a":""});var h="";
+if(i===0)h='<h2>'+p.ic+' '+p.name+'</h2><p>'+p.d+'</p><h3>Working principle</h3><p>'+p.intro+'</p><h3>How it operates</h3><p>Endpoints: <code>'+p.ep+'</code></p>';
+if(i===1)h='<h2>Required components</h2><div class="chips">'+p.comps.map(function(c){return '<div class="chip">'+c[0]+' '+c[1]+'</div>'}).join("")+'</div>';
+if(i===2)h='<h2>Hardware connections</h2><div class="scroll"><table><tr><th>Component pin</th><th>NodeMCU pin</th><th>Power / ground</th></tr>'+p.pins.map(function(r){return '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td></tr>'}).join("")+'</table></div><div class="note">'+p.pinNote+'</div><p class="mu">Wiring is given as a table; a drawn diagram is not included in this version.</p>';
+if(i===3)h='<h2>Complete source code</h2><p class="mu">'+LIBS+(p.lib?' '+p.lib:' No extra libraries needed.')+'</p><button class="p" id="cp">Copy code</button><pre id="cd"></pre>';
+if(i===4)h='<h2>Assemble, upload, operate</h2><ol><li>Wire the parts exactly as in the Wiring tab with the board unplugged.</li><li>Install the ESP8266 board package and any libraries listed on the Code tab.</li><li>Copy the code, set your Wi-Fi name and password, and select the NodeMCU board and COM port.</li><li>Click Upload. Open Serial Monitor (115200) and note the IP address.</li><li>Put the phone on the same Wi-Fi, enter the IP in the app, and tap Connect.</li><li>Open “'+p.name+'” and use its controls.</li></ol>';
+if(i===5)h='<h2>Troubleshooting</h2><ul>'+p.trouble.concat(COMMON_T).map(function(x){return '<li>'+x+'</li>'}).join("")+'</ul>';
+$("pane").innerHTML=h;
+if(i===3){$("cd").textContent=p.code;$("cp").onclick=function(){var b=$("cp");function ok(){b.textContent="Copied"}
+try{navigator.clipboard.writeText(p.code).then(ok,function(){sel()})}catch(e){sel()}
+function sel(){var r=document.createRange();r.selectNodeContents($("cd"));var s=getSelection();s.removeAllRanges();s.addRange(r);b.textContent="Selected, press Copy"}}}}
+$("app").innerHTML='<div class="tabs">'+tabs.map(function(t,i){return '<button data-t="'+i+'">'+t+'</button>'}).join("")+'</div><div class="card" id="pane"></div>';
+document.querySelectorAll(".tabs button").forEach(function(b){b.onclick=function(){show(+b.dataset.t)}});show(0)}
+function proj(id){var p=P.find(function(x){return x.id===id});hdr(p.name,true,"info-"+id);
+var c='<div class="card"><div class="mu" id="cs"></div></div><div class="card" id="pb"></div>';$("app").innerHTML=c;badge();var pb=$("pb");
+async function relay(s){try{var j=await api("/relay?state="+s);$("st").textContent="Relay is "+(j.relay?"ON":"OFF")}catch(e){$("st").textContent="Command failed. Check the connection."}}
+if(p.ctl==="relay"||p.ctl==="voice"){pb.innerHTML=(p.id==="gesture"?'<div class="note">Camera gesture recognition is not built into this version. Use the buttons; the firmware is the same.</div>':'')+'<div class="row"><button class="p g" id="on">Turn ON</button><button class="g" id="off">Turn OFF</button></div><p id="st" class="big">–</p>'+(p.ctl==="voice"?'<button id="mic" class="p">🎙️ Tap and say “on” or “off”</button><p class="mu" id="heard"></p>':'');
+$("on").onclick=function(){relay(1)};$("off").onclick=function(){relay(0)};
+if(p.ctl==="voice")$("mic").onclick=function(){var SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){$("heard").textContent="Speech recognition is not supported in this browser. Use Chrome or Edge.";return}
+recog=new SR();recog.lang="en-US";recog.onresult=function(e){var t=e.results[0][0].transcript.toLowerCase();$("heard").textContent='Heard: “'+t+'”';if(/\boff\b/.test(t))relay(0);else if(/\bon\b/.test(t))relay(1)};recog.onerror=function(e){$("heard").textContent="Mic error: "+e.error};recog.start()}}
+else{var path={dht:"/dht",parking:"/distance",sensors:"/sensors"}[p.ctl];
+pb.innerHTML='<div id="vals" class="big">–</div><p class="mu" id="err"></p><button id="rf" class="p">Refresh now</button>';
+async function poll(){try{var j=await api(path);$("err").textContent="";
+if(p.ctl==="dht")$("vals").innerHTML=j.t+' °C<br>'+j.h+' % humidity';
+if(p.ctl==="parking")$("vals").innerHTML=(j.cm<0?"No echo":j.cm+' cm')+'<br>'+({free:"✅ Free",near:"⚠️ Near",stop:"🛑 Stop",none:"No reading"}[j.state]||j.state);
+if(p.ctl==="sensors")$("vals").innerHTML=(j.t<-100?"Temp error":j.t+' °C')+'<br>'+(j.h<-100?"Humidity error":j.h+' %')+'<br>Light '+j.ldr+'/1023<br>'+(j.cm<0?"No echo":j.cm+' cm')}
+catch(e){if($("err"))$("err").textContent="No data. Check the connection and wiring (see ⓘ)."}}
+$("rf").onclick=poll;poll();timer=setInterval(poll,2000)}}
+function route(){clearInterval(timer);if(recog){try{recog.abort()}catch(e){}}var h=location.hash.slice(1);
+if(h==="app-info")appInfo();else if(h.indexOf("info-")===0&&P.some(function(x){return x.id===h.slice(5)}))pInfo(h.slice(5));else if(h.indexOf("p-")===0&&P.some(function(x){return x.id===h.slice(2)}))proj(h.slice(2));else home();window.scrollTo(0,0)}
+window.addEventListener("hashchange",route);route();
+</script></body></html>

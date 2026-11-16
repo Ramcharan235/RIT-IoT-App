@@ -1,0 +1,11 @@
+{
+  "name": "rit-iot-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RIT IoT App for ESP8266 NodeMCU",
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  }
+}
